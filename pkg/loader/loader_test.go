@@ -3,6 +3,7 @@ package loader
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -17,6 +18,17 @@ func toString(obj any) string {
 		panic(err)
 	}
 	return string(s)
+}
+
+func TestIsOpenAPI(t *testing.T) {
+	datav2, err := os.ReadFile("testdata/openapi_v2.json")
+	require.NoError(t, err)
+	require.True(t, isOpenAPI(datav2))
+
+	datav3, err := os.ReadFile("testdata/openapi_v3.yaml")
+	require.NoError(t, err)
+	require.True(t, isOpenAPI(datav3))
+
 }
 
 func TestHelloWorld(t *testing.T) {
