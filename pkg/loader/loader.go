@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/getkin/kin-openapi/openapi2"
 	"io"
 	"io/fs"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/getkin/kin-openapi/openapi2conv"
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/gptscript-ai/gptscript/pkg/assemble"
 	"github.com/gptscript-ai/gptscript/pkg/builtin"
@@ -25,6 +27,7 @@ import (
 	"github.com/gptscript-ai/gptscript/pkg/system"
 	"github.com/gptscript-ai/gptscript/pkg/types"
 	"gopkg.in/yaml.v3"
+	kyaml "sigs.k8s.io/yaml"
 )
 
 const CacheTimeout = time.Hour
@@ -130,22 +133,46 @@ func readTool(ctx context.Context, cache *cache.Client, prg *types.Program, base
 
 	var tools []types.Tool
 	if ver, ok := isOpenAPI(data); ok {
+		var err error
+		var t *openapi3.T
 		switch ver {
 		case 2:
-			return types.Tool{}, fmt.Errorf("OpenAPI v2 is not supported")
-		case 3:
-			if t, err := openapi3.NewLoader().LoadFromData(data); err == nil {
-				if base.Remote {
-					tools, err = getOpenAPITools(t, base.Location)
-				} else {
-					tools, err = getOpenAPITools(t, "")
-				}
+			// Convert OpenAPI v2 to v3
+			jsondata := data
+			if !json.Valid(data) {
+				jsondata, err = kyaml.YAMLToJSON(data)
 				if err != nil {
-					return types.Tool{}, fmt.Errorf("error parsing OpenAPI definition: %w", err)
+					return types.Tool{}, fmt.Errorf("error converting YAML to JSON: %w", err)
 				}
+			}
+
+			doc := &openapi2.T{}
+			if err := doc.UnmarshalJSON(jsondata); err != nil {
+				return types.Tool{}, fmt.Errorf("error unmarshalling OpenAPI v2: %w", err)
+			}
+
+			t, err = openapi2conv.ToV3(doc)
+			if err != nil {
+				return types.Tool{}, fmt.Errorf("error converting OpenAPI v2 to v3: %w", err)
+			}
+		case 3:
+			// Use OpenAPI v3 as is
+			t, err = openapi3.NewLoader().LoadFromData(data)
+			if err != nil {
+				return types.Tool{}, fmt.Errorf("error parsing OpenAPI definition: %w", err)
 			}
 		default:
 			return types.Tool{}, fmt.Errorf("unsupported OpenAPI version '%d'", ver)
+		}
+
+		// Extract tools from OpenAPIv3 document
+		if base.Remote {
+			tools, err = getOpenAPITools(t, base.Location)
+		} else {
+			tools, err = getOpenAPITools(t, "")
+		}
+		if err != nil {
+			return types.Tool{}, err
 		}
 	}
 
