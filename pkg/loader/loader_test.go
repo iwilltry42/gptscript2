@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gptscript-ai/gptscript/pkg/types"
+
 	"github.com/gptscript-ai/gptscript/pkg/openai"
 	"github.com/hexops/autogold/v2"
 	"github.com/stretchr/testify/require"
@@ -23,12 +25,34 @@ func toString(obj any) string {
 func TestIsOpenAPI(t *testing.T) {
 	datav2, err := os.ReadFile("testdata/openapi_v2.json")
 	require.NoError(t, err)
-	require.True(t, isOpenAPI(datav2))
+	v, ok := isOpenAPI(datav2)
+	require.True(t, ok)
+	require.Equal(t, 2, v, "expected openapi v2")
 
 	datav3, err := os.ReadFile("testdata/openapi_v3.yaml")
 	require.NoError(t, err)
-	require.True(t, isOpenAPI(datav3))
+	v, ok = isOpenAPI(datav3)
+	require.True(t, ok)
+	require.Equal(t, 3, v, "expected openapi v3")
+}
 
+func TestLoadOpenAPI(t *testing.T) {
+	prg := types.Program{
+		ToolSet: types.ToolSet{},
+	}
+
+	datav3, err := os.ReadFile("testdata/openapi_v3.yaml")
+	require.NoError(t, err)
+	_, err = readTool(context.Background(), nil, &prg, &source{Content: datav3}, "")
+	require.NoError(t, err, "failed to read openapi v3")
+
+	prg = types.Program{
+		ToolSet: types.ToolSet{},
+	}
+	datav2, err := os.ReadFile("testdata/openapi_v2.json")
+	require.NoError(t, err)
+	_, err = readTool(context.Background(), nil, &prg, &source{Content: datav2}, "")
+	require.NoError(t, err, "failed to read openapi v2")
 }
 
 func TestHelloWorld(t *testing.T) {

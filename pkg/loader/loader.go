@@ -12,6 +12,7 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -128,16 +129,23 @@ func readTool(ctx context.Context, cache *cache.Client, prg *types.Program, base
 	}
 
 	var tools []types.Tool
-	if isOpenAPI(data) {
-		if t, err := openapi3.NewLoader().LoadFromData(data); err == nil {
-			if base.Remote {
-				tools, err = getOpenAPITools(t, base.Location)
-			} else {
-				tools, err = getOpenAPITools(t, "")
+	if ver, ok := isOpenAPI(data); ok {
+		switch ver {
+		case 2:
+			return types.Tool{}, fmt.Errorf("OpenAPI v2 is not supported")
+		case 3:
+			if t, err := openapi3.NewLoader().LoadFromData(data); err == nil {
+				if base.Remote {
+					tools, err = getOpenAPITools(t, base.Location)
+				} else {
+					tools, err = getOpenAPITools(t, "")
+				}
+				if err != nil {
+					return types.Tool{}, fmt.Errorf("error parsing OpenAPI definition: %w", err)
+				}
 			}
-			if err != nil {
-				return types.Tool{}, fmt.Errorf("error parsing OpenAPI definition: %w", err)
-			}
+		default:
+			return types.Tool{}, fmt.Errorf("unsupported OpenAPI version '%d'", ver)
 		}
 	}
 
@@ -364,15 +372,41 @@ func SplitToolRef(targetToolName string) (toolName, subTool string) {
 		strings.Join(fields[:idx], " ")
 }
 
-func isOpenAPI(data []byte) bool {
+// isOpenAPI checks if the data is an OpenAPI definition and returns the version if it is.
+func isOpenAPI(data []byte) (int, bool) {
 	var fragment struct {
-		Paths map[string]any `json:"paths,omitempty"`
+		Paths   map[string]any `json:"paths,omitempty"`
+		Swagger string         `json:"swagger,omitempty"`
+		OpenAPI string         `json:"openapi,omitempty"`
 	}
 
 	if err := json.Unmarshal(data, &fragment); err != nil {
 		if err := yaml.Unmarshal(data, &fragment); err != nil {
-			return false
+			return 0, false
 		}
 	}
-	return len(fragment.Paths) > 0
+	if len(fragment.Paths) == 0 {
+		return 0, false
+	}
+
+	if v, _, _ := strings.Cut(fragment.OpenAPI, "."); v != "" {
+		ver, err := strconv.Atoi(v)
+		if err != nil {
+			log.Debugf("invalid OpenAPI version: openapi=%q", fragment.OpenAPI)
+			return 0, false
+		}
+		return ver, true
+	}
+
+	if v, _, _ := strings.Cut(fragment.Swagger, "."); v != "" {
+		ver, err := strconv.Atoi(v)
+		if err != nil {
+			log.Debugf("invalid Swagger version: swagger=%q", fragment.Swagger)
+			return 0, false
+		}
+		return ver, true
+	}
+
+	log.Debugf("no OpenAPI version found in input data: openapi=%q, swagger=%q", fragment.OpenAPI, fragment.Swagger)
+	return 0, false
 }
